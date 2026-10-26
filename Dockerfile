@@ -11,6 +11,7 @@ RUN pip install --no-cache-dir ".[openai,ui]"
 
 COPY data/policies ./data/policies
 COPY app ./app
+COPY .streamlit ./.streamlit
 
 RUN useradd --create-home appuser && mkdir -p /app/data && chown -R appuser /app/data
 USER appuser

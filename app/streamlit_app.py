@@ -11,14 +11,15 @@ import streamlit as st
 API_URL = os.getenv("OPSPILOT_API_URL", "http://localhost:8000")
 
 st.set_page_config(page_title="OpsPilot", page_icon="🧭", layout="wide")
+st.markdown("<style>.block-container {padding-top: 1.5rem;}</style>", unsafe_allow_html=True)
 st.title("🧭 OpsPilot")
 st.caption("Internal operations assistant for Lumen Analytics Ltd (a fictional company)")
 
-api = httpx.Client(base_url=API_URL, timeout=60)
+api = httpx.Client(base_url=API_URL, timeout=90)
 
-if "thread_id" not in st.session_state:
-    st.session_state.thread_id = None
-    st.session_state.history = []
+st.session_state.setdefault("thread_id", None)
+st.session_state.setdefault("history", [])
+st.session_state.setdefault("awaiting", None)
 
 
 def show_result(result: dict) -> None:
@@ -36,31 +37,47 @@ def show_result(result: dict) -> None:
         st.caption(" · ".join(details))
 
 
-chat_col, manager_col = st.columns([2, 1])
+def send(message: str) -> dict:
+    response = api.post("/chat", json={"message": message, "thread_id": st.session_state.thread_id})
+    if response.status_code != 200:
+        return {"answer": f"⚠️ {response.json().get('detail', response.text)}"}
+    result = response.json()
+    st.session_state.thread_id = result["thread_id"]
+    return result
+
+
+chat_col, manager_col = st.columns([2, 1], gap="large")
 
 with chat_col:
-    st.subheader("Employee chat")
-    if st.button("New conversation"):
-        st.session_state.thread_id = None
-        st.session_state.history = []
+    header, reset = st.columns([4, 1], vertical_alignment="center")
+    header.subheader("Employee chat")
+    if reset.button("New chat", use_container_width=True):
+        st.session_state.update(thread_id=None, history=[], awaiting=None)
+        st.rerun()
 
-    for role, payload in st.session_state.history:
-        with st.chat_message(role):
-            show_result(payload) if role == "assistant" else st.markdown(payload)
+    messages = st.container(height=380, autoscroll=True)
+    with messages:
+        if not st.session_state.history:
+            st.caption(
+                "Try: “How many days of annual leave do I get?” or “My laptop was stolen, raise a ticket.”"
+            )
+        for role, payload in st.session_state.history:
+            with st.chat_message(role):
+                if role == "assistant":
+                    show_result(payload)
+                else:
+                    st.markdown(payload)
+        if st.session_state.awaiting:
+            with st.chat_message("assistant"), st.spinner("Thinking…"):
+                result = send(st.session_state.awaiting)
+            st.session_state.history.append(("assistant", result))
+            st.session_state.awaiting = None
+            st.rerun()
 
     if prompt := st.chat_input("Ask about leave, IT, expenses… or raise a ticket"):
         st.session_state.history.append(("user", prompt))
-        with st.chat_message("user"):
-            st.markdown(prompt)
-        response = api.post("/chat", json={"message": prompt, "thread_id": st.session_state.thread_id})
-        if response.status_code != 200:
-            st.error(response.json().get("detail", response.text))
-        else:
-            result = response.json()
-            st.session_state.thread_id = result["thread_id"]
-            st.session_state.history.append(("assistant", result))
-            with st.chat_message("assistant"):
-                show_result(result)
+        st.session_state.awaiting = prompt
+        st.rerun()
 
 with manager_col:
     st.subheader("Manager approvals")
@@ -81,10 +98,15 @@ with manager_col:
             approve, reject = st.columns(2)
             for col, approved, label in ((approve, True, "Approve"), (reject, False, "Reject")):
                 if col.button(label, key=f"{label}-{thread_id}", use_container_width=True):
-                    result = api.post(
-                        f"/approvals/{thread_id}",
-                        json={"approved": approved, "reviewer": "Demo Manager", "comment": comment or None},
-                    ).json()
+                    with st.spinner("Resuming the agent…"):
+                        result = api.post(
+                            f"/approvals/{thread_id}",
+                            json={
+                                "approved": approved,
+                                "reviewer": "Demo Manager",
+                                "comment": comment or None,
+                            },
+                        ).json()
                     if thread_id == st.session_state.thread_id:
                         st.session_state.history.append(("assistant", result))
                     st.rerun()

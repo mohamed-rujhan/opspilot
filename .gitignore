@@ -20,3 +20,6 @@ data/chroma/
 .vscode/
 .idea/
 .DS_Store
+
+# LinkedIn post materials (kept local)
+linkedin/

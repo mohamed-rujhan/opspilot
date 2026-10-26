@@ -10,7 +10,9 @@ import argparse
 import json
 import re
 import statistics
+import sys
 import tempfile
+import time
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -23,7 +25,8 @@ DATASET = PROJECT_ROOT / "evals" / "dataset.jsonl"
 RESULTS_DIR = PROJECT_ROOT / "evals" / "results"
 REFUSAL_RE = re.compile(
     r"can(?:'|no)t help|cannot help|can only help|only able to help|outside (?:of )?(?:my|the) scope"
-    r"|not able to help|unable to help|I can answer questions about|I'm sorry, but",
+    r"|not able to help|unable to help|I(?:'m| am) unable to|I can answer questions about|I'm sorry, but"
+    r"|I(?:'m| am) (?:only )?designed to help|I can(?:not|'t) (?:write|assist|answer)",
     re.IGNORECASE,
 )
 
@@ -87,7 +90,7 @@ def run_offline(settings: Settings, cases: list[dict]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def run_live(settings: Settings, cases: list[dict]) -> str:
+def run_live(settings: Settings, cases: list[dict], delay: float = 0.0) -> str:
     from fastapi.testclient import TestClient
 
     from opspilot.factory import build_agent
@@ -101,13 +104,24 @@ def run_live(settings: Settings, cases: list[dict]) -> str:
     )
 
     answer_ok, tool_ok, refusal_ok, approval_ok = Metric(), Metric(), Metric(), Metric()
-    latencies, tokens_in, tokens_out = [], 0, 0
+    latencies, tokens_in, tokens_out, errors = [], 0, 0, []
 
-    for case in cases:
+    for n, case in enumerate(cases, 1):
+        if n > 1 and delay:
+            time.sleep(delay)  # stay under free-tier rate limits
         result = agent.chat(case["question"])
+        print(f"[{n}/{len(cases)}] {case['id']}: {result.status}", file=sys.stderr, flush=True)
+        if result.status == "error":
+            errors.append(case["id"])
         if result.status == "pending_approval":
             approval_ok.add(case.get("expect_approval", False), case["id"])
+            paused = result
             result = agent.resolve_approval(result.thread_id, approved=True, reviewer="Eval Manager")
+            # Count the work done before the pause (e.g. the request_leave call) as part of this case.
+            result.tools_used = paused.tools_used + result.tools_used
+            result.input_tokens += paused.input_tokens
+            result.output_tokens += paused.output_tokens
+            result.latency_ms += paused.latency_ms
         elif case.get("expect_approval"):
             approval_ok.add(False, case["id"])
 
@@ -145,6 +159,7 @@ def run_live(settings: Settings, cases: list[dict]) -> str:
         *[f"| {name} | {m.rate} |" for name, m in rows],
         f"| Latency (mean / p95) | {statistics.mean(latencies):.0f} ms / {p95} ms |",
         f"| Tokens (input / output) | {tokens_in:,} / {tokens_out:,} |",
+        f"| Model errors (counted as failures) | {len(errors)} |",
     ]
     if cost:
         lines.append(f"| Estimated cost | ${cost:.4f} |")
@@ -157,10 +172,11 @@ def run_live(settings: Settings, cases: list[dict]) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument("--offline", action="store_true", help="retrieval and guardrails only")
+    parser.add_argument("--delay", type=float, default=0.0, help="seconds between live cases (rate limits)")
     args = parser.parse_args()
 
     settings, cases = get_settings(), load_cases()
-    report = run_offline(settings, cases) if args.offline else run_live(settings, cases)
+    report = run_offline(settings, cases) if args.offline else run_live(settings, cases, args.delay)
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     (RESULTS_DIR / ("offline.md" if args.offline else "live.md")).write_text(report)
     print(report)

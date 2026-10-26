@@ -43,6 +43,7 @@ flowchart LR
 | Regex-based guardrails | Fast, transparent, zero cost, easy to test | Can be bypassed by paraphrasing — add an LLM or classifier-based check in production |
 | Human approval for leave | Writes that affect people or money should not be fully autonomous | Approval state is in memory; use a persistent checkpointer (Postgres/Redis) in production |
 | Mock service desk over REST | Exercises real integration concerns (HTTP errors, 404s, validation) | Replace with ServiceNow / Jira APIs and OAuth |
+| Model fallback chain + timeouts | Hosted models return 503s under load; the agent falls back to a lighter model instead of failing | The fallback model may answer less well — evals should be run on both |
 | Scripted fake LLM in tests | Agent logic is tested deterministically in CI without API keys or cost | Model quality is measured separately by the live eval |
 
 ## Evaluation

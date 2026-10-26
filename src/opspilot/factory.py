@@ -5,7 +5,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 
 from opspilot.agent import OpsPilotAgent, build_graph
 from opspilot.config import Settings
-from opspilot.llm import get_chat_model
+from opspilot.llm import get_chat_model, get_fallback_models
 from opspilot.retrieval import Retriever, build_retriever
 from opspilot.tools import make_tools
 
@@ -27,5 +27,9 @@ def build_agent(
         default_country=settings.holiday_country,
         top_k=settings.retrieval_top_k,
     )
-    graph = build_graph(model or get_chat_model(settings), tools)
+    if model is None:
+        model, fallbacks = get_chat_model(settings), get_fallback_models(settings)
+    else:
+        fallbacks = []
+    graph = build_graph(model, tools, fallbacks=fallbacks)
     return OpsPilotAgent(graph, max_steps=settings.max_agent_steps, max_input_chars=settings.max_input_chars)

@@ -123,3 +123,37 @@ def test_conversation_keeps_context_within_a_thread(make_agent):
 
     human_turns = [m.content for m in model.calls[1] if m.type == "human"]
     assert human_turns == ["hello", "what did I say?"]
+
+
+def test_model_failure_returns_error_instead_of_crashing(make_agent):
+    def overloaded(messages):
+        raise RuntimeError("503 UNAVAILABLE")
+
+    agent = make_agent(ScriptedChatModel(steps=[overloaded]))
+
+    result = agent.chat("How many days of annual leave do I get?")
+
+    assert result.status == "error"
+    assert "temporarily unavailable" in result.answer
+
+
+def test_fallback_model_is_used_when_primary_fails(settings, retriever, service_desk, public_http):
+    from opspilot.agent import OpsPilotAgent, build_graph
+    from opspilot.tools import make_tools
+
+    def overloaded(messages):
+        raise RuntimeError("503 UNAVAILABLE")
+
+    tools = make_tools(
+        retriever, service_desk, public_http, holiday_api_url="https://h.test", default_country="GB"
+    )
+    graph = build_graph(
+        ScriptedChatModel(steps=[overloaded]),
+        tools,
+        fallbacks=[ScriptedChatModel(steps=[answer("Answered by the fallback model.")])],
+    )
+
+    result = OpsPilotAgent(graph).chat("hello")
+
+    assert result.status == "answered"
+    assert result.answer == "Answered by the fallback model."

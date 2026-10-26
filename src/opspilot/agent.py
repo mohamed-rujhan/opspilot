@@ -30,8 +30,19 @@ logger = logging.getLogger(__name__)
 _SOURCE_RE = re.compile(r"\[source: ([^\]]+)\]")
 
 
-def build_graph(model: BaseChatModel, tools: Sequence[BaseTool], checkpointer=None):
+SERVICE_UNAVAILABLE_MESSAGE = "The AI service is temporarily unavailable. Please try again in a moment."
+
+
+def build_graph(
+    model: BaseChatModel,
+    tools: Sequence[BaseTool],
+    checkpointer=None,
+    fallbacks: Sequence[BaseChatModel] = (),
+):
     model_with_tools = model.bind_tools(list(tools))
+    if fallbacks:
+        # If the primary model errors (e.g. 503 overloaded), the same request is retried on each fallback.
+        model_with_tools = model_with_tools.with_fallbacks([m.bind_tools(list(tools)) for m in fallbacks])
 
     def call_model(state: MessagesState) -> dict:
         response = model_with_tools.invoke([SystemMessage(SYSTEM_PROMPT), *state["messages"]])
@@ -48,7 +59,7 @@ def build_graph(model: BaseChatModel, tools: Sequence[BaseTool], checkpointer=No
 
 class ChatResult(BaseModel):
     thread_id: str
-    status: Literal["answered", "pending_approval", "blocked"]
+    status: Literal["answered", "pending_approval", "blocked", "error"]
     answer: str | None = None
     pending_action: dict[str, Any] | None = None
     tools_used: list[str] = Field(default_factory=list)
@@ -106,7 +117,16 @@ class OpsPilotAgent:
         config = self._config(thread_id)
         before = len(self.graph.get_state(config).values.get("messages", []))
         started = time.perf_counter()
-        self.graph.invoke(graph_input, config)
+        try:
+            self.graph.invoke(graph_input, config)
+        except Exception:
+            logger.exception("agent run failed thread=%s", thread_id)
+            return ChatResult(
+                thread_id=thread_id,
+                status="error",
+                answer=SERVICE_UNAVAILABLE_MESSAGE,
+                latency_ms=int((time.perf_counter() - started) * 1000),
+            )
         latency_ms = int((time.perf_counter() - started) * 1000)
 
         state = self.graph.get_state(config)

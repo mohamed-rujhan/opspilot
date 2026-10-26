@@ -12,11 +12,13 @@ manager approves them**.
 - **Policy Q&A with RAG** — answers grounded in HR/IT policy documents, citing `file#section` sources.
 - **Tool calling** — create and check IT tickets via a REST service desk; look up public holidays from a public API.
 - **Human-in-the-loop** — leave requests use LangGraph `interrupt()`; nothing is written until a manager approves.
+- **Resilience** — request timeouts and automatic fallback to a lighter model when the primary model is
+  overloaded; failures return a clean error instead of crashing.
 - **Guardrails** — prompt-injection detection, poisoned-document filtering, tool allow-list, system-prompt leak
   detection, PII redaction in logs and outputs, input limits, out-of-scope refusals.
 - **Evaluation** — 31-case dataset; offline retrieval/guardrail metrics run in CI, live agent metrics on demand.
 - **Production basics** — FastAPI, typed settings, Docker Compose (API + service desk + UI), GitHub Actions CI,
-  48 tests with a scripted fake LLM (no API key needed).
+  50 tests with a scripted fake LLM (no API key needed).
 
 ## Architecture
 
@@ -97,9 +99,19 @@ Latest offline results (`evals/results/offline.md`):
 | Prompt injections blocked | 2/2 (100%) |
 | Legitimate questions allowed | 29/29 (100%) |
 
-The live evaluation measures answer correctness, tool choice, refusal handling, approval pauses, latency and
-token usage; results are written to `evals/results/live.md`. The dataset is small and written alongside the
-policies, so it is a regression check rather than a benchmark.
+Latest live results (`evals/results/live.md`, model `gemini-3.5-flash`, BM25 retrieval, 31 cases):
+
+| Metric | Result |
+|---|---|
+| Answer correctness (expected facts present) | 26/26 (100%) |
+| Correct tool chosen | 27/27 (100%) |
+| Out-of-scope / injection handled | 4/4 (100%) |
+| Leave requests paused for approval | 1/1 (100%) |
+| Latency (mean / p95) | 4.7 s / 8.5 s |
+| Tokens (input / output) | 52.6k / 2.3k |
+
+The dataset is small and written alongside the policies, so it is a regression check rather than a benchmark.
+Run it against any model with `OPSPILOT_LLM_MODEL=<model> python -m opspilot.evals --delay 4`.
 
 ## Project structure
 

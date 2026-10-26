@@ -16,8 +16,11 @@ class Settings(BaseSettings):
 
     # LLM
     llm_provider: str = "gemini"
-    llm_model: str = "gemini-2.0-flash"
+    llm_model: str = "gemini-flash-latest"  # alias that follows Google's current Flash model
+    llm_fallback_models: str = "gemini-flash-lite-latest"  # comma-separated, tried in order on errors
     llm_temperature: float = 0.0
+    llm_timeout_seconds: float = 60.0
+    llm_max_retries: int = 1
     gemini_api_key: str | None = None
     openai_api_key: str | None = None
     # Optional, for cost estimates in evals (USD per 1M tokens)

@@ -1,0 +1,33 @@
+services:
+  service-desk:
+    build: .
+    command: ["uvicorn", "opspilot.ticket_service.app:app", "--host", "0.0.0.0", "--port", "8001"]
+    ports:
+      - "8001:8001"
+    volumes:
+      - service-desk-data:/app/data
+
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      OPSPILOT_TICKET_API_URL: http://service-desk:8001
+    depends_on:
+      - service-desk
+
+  ui:
+    build: .
+    command: ["streamlit", "run", "app/streamlit_app.py", "--server.address=0.0.0.0", "--server.port=8501"]
+    ports:
+      - "8501:8501"
+    environment:
+      OPSPILOT_API_URL: http://api:8000
+    depends_on:
+      - api
+
+volumes:
+  service-desk-data:
